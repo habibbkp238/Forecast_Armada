@@ -1,0 +1,12 @@
+# File: requirements.txt
+
+streamlit
+pandas
+plotly
+openpyxl
+nixtlats
+statsforecast
+mlforecast
+lightgbm
+scikit-learn
+statsmodels
