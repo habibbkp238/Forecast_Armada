@@ -46,15 +46,31 @@ def select_champion_model(df_cv: pd.DataFrame) -> pd.DataFrame:
     champions = champion_map.loc[champion_map.groupby('unique_id')['mape'].idxmin()]
     return champions[['unique_id', 'model']].rename(columns={'model': 'champion_model'})
 
-def run_forecasting_pipeline(df_history: pd.DataFrame, df_events: pd.DataFrame, granularity: str, api_key: str, horizon: int) -> (pd.DataFrame, Dict[str, Any], pd.DataFrame):
-    """Orkestrasi utama pipeline forecasting, sekarang mengembalikan hasil CV."""
+def run_forecasting_pipeline(df_history: pd.DataFrame, df_events: pd.DataFrame, granularity: str, api_key: str, horizon: int) -> (pd.DataFrame, Dict[str, Any], pd.DataFrame, pd.DataFrame):
+    """Orkestrasi utama pipeline forecasting, sekarang mengembalikan hasil CV dan data profil."""
     stat_models, mlf, freq, season_length = get_base_models(granularity)
-    is_key_valid = api_key and api_key.startswith("nixtla_")
+    is_key_valid = api_key and api_key.startswith("nixak-")
+
+    # --- Tes Koneksi API TimeGPT di Awal ---
+    timegpt = None
+    if is_key_valid:
+        try:
+            timegpt = TimeGPT(token=api_key)
+            timegpt.validate_token() 
+            st.success("Koneksi ke TimeGPT berhasil. TimeGPT akan diikutsertakan dalam kompetisi model.")
+        except Exception as e:
+            st.error(f"""
+            **Gagal Terhubung ke TimeGPT** | Error: `{e}`
+            
+            Pastikan API Key Anda benar dan akun Nixtla Anda aktif.
+            **Proses forecast akan dilanjutkan tanpa menggunakan TimeGPT.**
+            """)
+            is_key_valid = False
 
     df_profiles = calculate_route_characteristics(df_history.copy())
     
     all_forecasts = []
-    all_cv_results = [] # List untuk menyimpan semua hasil CV
+    all_cv_results = []
     metadata = {'total_routes': len(df_profiles), 'model_counts': {}}
 
     for _, profile in df_profiles.iterrows():
@@ -101,12 +117,11 @@ def run_forecasting_pipeline(df_history: pd.DataFrame, df_events: pd.DataFrame, 
                     cv_results_this_run.append(cv_ml.melt(id_vars=['unique_id', 'ds', 'cutoff', 'y'], var_name='model', value_name='y_hat'))
                 
                 if 'TimeGPT' in model_candidates_names:
-                    timegpt = TimeGPT(token=api_key)
                     cv_tgpt = timegpt.cross_validation(df=df_series, h=1, n_windows=CV_STEPS, freq=freq)
                     cv_results_this_run.append(cv_tgpt.melt(id_vars=['unique_id', 'ds', 'cutoff', 'y'], var_name='model', value_name='y_hat'))
 
                 df_cv_all_series = pd.concat(cv_results_this_run)
-                all_cv_results.append(df_cv_all_series) # Simpan hasil CV
+                all_cv_results.append(df_cv_all_series)
                 
                 champion = select_champion_model(df_cv_all_series)
                 champion_model_name = champion['champion_model'].iloc[0]
@@ -125,8 +140,17 @@ def run_forecasting_pipeline(df_history: pd.DataFrame, df_events: pd.DataFrame, 
                 forecast['champion_model'] = champion_model_name
                 all_forecasts.append(forecast)
         
+        except NotImplementedError:
+            champion_model_name = 'AutoETS (Fallback Tiny Data)'
+            sf_fallback = StatsForecast(models=[AutoETS()], freq=freq, n_jobs=-1)
+            sf_fallback.fit(df_series)
+            forecast = sf_fallback.predict(h=horizon)
+            forecast.rename(columns={'AutoETS': 'y_hat'}, inplace=True)
+            forecast['champion_model'] = champion_model_name
+            all_forecasts.append(forecast)
+        
         except Exception as e:
-            st.warning(f"Error pada rute {uid}: {e}. Menggunakan AutoETS sebagai fallback.")
+            st.warning(f"Error tak terduga pada rute {uid}: {e}. Menggunakan AutoETS sebagai fallback.")
             champion_model_name = 'AutoETS (Error Fallback)'
             sf_fallback = StatsForecast(models=[AutoETS()], freq=freq, n_jobs=-1)
             sf_fallback.fit(df_series)
@@ -138,16 +162,16 @@ def run_forecasting_pipeline(df_history: pd.DataFrame, df_events: pd.DataFrame, 
         metadata['model_counts'][champion_model_name] = metadata['model_counts'].get(champion_model_name, 0) + 1
 
     if not all_forecasts:
-        return pd.DataFrame(), {}, pd.DataFrame()
+        return pd.DataFrame(), {}, pd.DataFrame(), pd.DataFrame()
         
     final_forecast_df = pd.concat(all_forecasts).reset_index(drop=True)
     df_cv_final = pd.concat(all_cv_results).reset_index(drop=True) if all_cv_results else pd.DataFrame()
 
-    dim_cols = df_history[['unique_id', 'origin', 'location', 'fleet_type']].drop_duplicates()
+    # --- PERUBAHAN DI SINI: Sertakan 'company' saat menggabungkan kembali dimensi ---
+    dim_cols = df_history[['unique_id', 'company', 'origin', 'location', 'fleet_type']].drop_duplicates()
     final_with_dims = pd.merge(final_forecast_df, dim_cols, on='unique_id')
     
     full_df = pd.concat([df_history, final_with_dims])
     full_df = full_df.drop_duplicates(subset=['unique_id', 'ds'], keep='last')
 
-    # --- PERUBAHAN RETURN ---
-    return full_df, metadata, df_cv_final
+    return full_df, metadata, df_cv_final, df_profiles

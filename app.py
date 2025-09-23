@@ -5,6 +5,52 @@ from datetime import datetime
 # Impor modul-modul
 from modules import data_loader, quality_checker, forecasting, visualization, exporter
 
+# --- FUNGSI UNTUK MEMUAT CSS KUSTOM ---
+def load_custom_css():
+    st.markdown("""
+        <style>
+            /* Palet Warna */
+            .main { background-color: #F9F5F0; }
+            h1, h2, h3 { color: #344F1F; }
+            div[role="radiogroup"] > label {
+                padding: 5px 15px; border-radius: 20px; border: 1px solid #D1C7B8;
+                background-color: #FFFFFF; color: #344F1F; margin-right: 10px; transition: all 0.3s;
+            }
+            div[role="radiogroup"] > label:has(input:checked) {
+                background-color: #F4991A; color: #F9F5F0; border: 1px solid #344F1F;
+            }
+            .stButton>button {
+                border-radius: 20px; border: 2px solid #F4991A; background-color: #F4991A;
+                color: white; font-weight: bold; transition: all 0.3s;
+            }
+            .stButton>button:hover { background-color: #FFFFFF; color: #F4991A; }
+            div[data-testid="stMetric"] {
+                background-color: #F4991A; border: 1px solid #E0D8C8; border-radius: 10px;
+                padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            }
+            div[data-testid="stSidebarUserContent"] { background-color: #F2EAD3; }
+        </style>
+    """, unsafe_allow_html=True)
+
+# --- FUNGSI BARU UNTUK FOOTER ---
+def display_footer():
+    year = datetime.now().year
+    st.markdown(f"""
+        <style>
+            .footer {{
+                position: relative; left: 0; bottom: 0; width: 100%;
+                background-color: #344F1F; color: #F2EAD3; text-align: center;
+                padding: 10px; border-radius: 10px; margin-top: 2rem;
+            }}
+            .footer a {{ color: #F4991A; text-decoration: none; }}
+            .footer a:hover {{ text-decoration: underline; }}
+        </style>
+        <div class="footer">
+            <p>&copy; {year} - Fleet Forecasting Engine | by Irsandi Habibie | https://www.linkedin.com/in/habibie238/ <br>
+            <a href="irsandi.nur@bkpprima.co.id" target="_blank">Hubungi Pengembang</a></p>
+        </div>
+    """, unsafe_allow_html=True)
+
 # --- Konfigurasi Halaman & Inisialisasi State ---
 st.set_page_config(
     page_title="Fleet Forecasting Engine",
@@ -12,8 +58,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Panggil fungsi CSS setelah set_page_config
+load_custom_css()
+
 def initialize_session_state():
-    # State untuk data
+    # ... (Isi fungsi ini tidak berubah) ...
     if 'data_loaded' not in st.session_state:
         st.session_state.data_loaded = False
     if 'df_history_full' not in st.session_state:
@@ -24,8 +73,6 @@ def initialize_session_state():
         st.session_state.df_events = None
     if 'cutoff_date' not in st.session_state:
         st.session_state.cutoff_date = None
-
-    # State untuk pengaturan & navigasi
     if 'forecast_horizon' not in st.session_state:
         st.session_state.forecast_horizon = 3
     if 'forecast_granularity' not in st.session_state:
@@ -38,7 +85,6 @@ def initialize_session_state():
         st.session_state.forecast_level = "Kota"
 
 initialize_session_state()
-
 
 # --- Sidebar ---
 with st.sidebar:
@@ -53,15 +99,22 @@ with st.sidebar:
     st.markdown("---")
     st.info("Aplikasi ini membantu memproyeksikan kebutuhan armada.")
 
-# --- Tampilan Utama ---
-st.title("Dashboard Fleet Forecasting")
+# --- Header Profesional ---
+col1, col2 = st.columns([1, 4])
+with col1:
+    st.image(r"C:\Users\irsandi.nur\OneDrive - PT. Bina Karya Prima (BKP)\NEW DIRECTORY\10_Logistik\Forecast Armada\App\asset\logistics.png", width=100)
+with col2:
+    st.title("Fleet Forecasting Engine")
+    st.markdown("##### Rencanakan Kebutuhan Armada")
+st.markdown("---")
 
+# --- Tampilan Utama ---
 tab_names = [
     "1. Upload Data & Pengaturan", 
     "2. Data Quality Check", 
     "3. Event Check & Override",
     "4. Run Forecast & Results",
-    "5. Export Forecast"
+    "5. Ringkasan & Ekspor"
 ]
 
 def set_active_tab(tab_name):
@@ -88,8 +141,8 @@ if st.session_state.active_tab == tab_names[0]:
     col1, col2, col3 = st.columns(3)
     with col1:
         st.session_state.forecast_level = st.selectbox(
-            "Level Agregasi Destinasi",
-            ("Kota", "Provinsi", "Region"),
+            "Pilih Level Agregasi",
+            ("Company", "Region", "Provinsi", "Kota"),
             key="forecast_level_selector"
         )
     with col2:
@@ -128,7 +181,7 @@ if st.session_state.active_tab == tab_names[0]:
         set_active_tab(tab_names[1])
         st.rerun()
 
-# --- Tab 2 & 3 ---
+# --- Sisa Tab (Tidak ada perubahan) ---
 elif st.session_state.active_tab == tab_names[1]:
     st.header("Langkah 2: Pemeriksaan Kualitas Data")
     if not st.session_state.data_loaded or st.session_state.df_history is None:
@@ -164,9 +217,6 @@ elif st.session_state.active_tab == tab_names[2]:
     if col_next.button("Berikutnya →", use_container_width=True):
         set_active_tab(tab_names[3])
         st.rerun()
-
-
-# --- Tab 4: Run Forecast & Results ---
 elif st.session_state.active_tab == tab_names[3]:
     st.header("Langkah 4: Jalankan Forecast dan Visualisasikan Hasil")
     if not st.session_state.data_loaded or st.session_state.df_history is None:
@@ -181,7 +231,7 @@ elif st.session_state.active_tab == tab_names[3]:
 
         if run_forecast_button:
             with st.spinner("Mesin forecast sedang bekerja..."):
-                forecast_df, metadata, cv_df = forecasting.run_forecasting_pipeline(
+                forecast_df, metadata, cv_df, profiles_df = forecasting.run_forecasting_pipeline(
                     df_history=st.session_state.df_history,
                     df_events=st.session_state.df_events,
                     granularity=st.session_state.forecast_granularity,
@@ -191,18 +241,18 @@ elif st.session_state.active_tab == tab_names[3]:
                 st.session_state.forecast_results = { 
                     "data": forecast_df, 
                     "metadata": metadata,
-                    "cv_data": cv_df
+                    "cv_data": cv_df,
+                    "profiles_data": profiles_df
                 }
             st.success("Proses forecast selesai!")
 
         if st.session_state.forecast_results:
-            # --- PERUBAHAN LOKASI TOGGLE ---
             st.subheader("Grafik Hasil Forecast")
             
             show_backtesting = st.toggle(
                 "Tampilkan Hasil Backtesting di Grafik", 
                 value=False,
-                help="Aktifkan untuk menampilkan performa model-model kandidat pada data masa lalu. Ini membantu memvalidasi mengapa model juara terpilih."
+                help="Aktifkan untuk menampilkan performa model-model kandidat pada data masa lalu."
             )
             
             visualization.display_forecast_plots(
@@ -212,7 +262,6 @@ elif st.session_state.active_tab == tab_names[3]:
         else:
             st.info("Klik tombol 'Jalankan Proses Forecast' untuk melihat hasilnya.")
     
-    # Navigasi
     st.markdown('<hr style="margin-top: 2rem; margin-bottom: 1rem;">', unsafe_allow_html=True)
     col_prev, _, col_next = st.columns([1, 5, 1])
     if col_prev.button("← Sebelumnya", use_container_width=True):
@@ -221,13 +270,45 @@ elif st.session_state.active_tab == tab_names[3]:
     if col_next.button("Berikutnya →", use_container_width=True):
         set_active_tab(tab_names[4])
         st.rerun()
-
-# --- Tab 5 ---
 elif st.session_state.active_tab == tab_names[4]:
-    st.header("Langkah 5: Ekspor Hasil Forecast")
+    st.header("Langkah 5: Ringkasan & Ekspor")
     if st.session_state.forecast_results is None:
         st.warning("Belum ada hasil forecast. Silakan jalankan forecast di Tab 4.")
     else:
+        st.subheader("Ringkasan Kunci Hasil Forecast")
+        
+        results_data = st.session_state.forecast_results['data']
+        all_companies = sorted(results_data['company'].unique())
+        selected_company = st.selectbox("Tampilkan Ringkasan untuk Company:", options=all_companies)
+        
+        filtered_results_data = results_data[results_data['company'] == selected_company]
+        
+        forecast_data = filtered_results_data[filtered_results_data['y'].isna()].copy()
+        total_forecasted_demand = forecast_data['y_hat'].sum()
+        
+        champion_models = st.session_state.forecast_results['metadata'].get('model_counts', {})
+        most_used_model = max(champion_models, key=champion_models.get) if champion_models else "N/A"
+        unit = "Bulan" if st.session_state.forecast_granularity == "Bulanan" else "Minggu"
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                label=f"Total Prediksi Armada ({st.session_state.forecast_horizon} {unit} ke depan)",
+                value=f"{int(total_forecasted_demand):,}"
+            )
+        with col2:
+            st.metric(
+                label="Model Juara Paling Sering Digunakan",
+                value=most_used_model
+            )
+        with col3:
+            st.metric(
+                label="Total Series yang Di-forecast",
+                value=len(filtered_results_data['unique_id'].unique())
+            )
+        
+        st.markdown("---")
+        st.subheader("Ekspor Hasil Lengkap")
         st.write("Klik tombol di bawah untuk mengunduh hasil forecast dalam format Excel.")
         excel_bytes = exporter.create_excel_export(st.session_state.forecast_results)
         st.download_button(
@@ -242,3 +323,6 @@ elif st.session_state.active_tab == tab_names[4]:
     if col_prev.button("← Sebelumnya", use_container_width=True):
         set_active_tab(tab_names[3])
         st.rerun()
+
+# --- PANGGIL FUNGSI FOOTER DI BAGIAN PALING AKHIR ---
+display_footer()

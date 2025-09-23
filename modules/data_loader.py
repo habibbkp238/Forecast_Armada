@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 
 # Kolom yang wajib ada di file historis
-REQUIRED_HISTORY_COLS = ['date', 'origin', 'destination', 'region', 'province', 'fleet_type']
+REQUIRED_HISTORY_COLS = ['date', 'company', 'origin', 'destination', 'region', 'province', 'fleet_type']
 # Kolom yang wajib ada di file event
 REQUIRED_EVENT_COLS = ['date', 'event', 'uplift']
 
 def process_uploaded_files(history_file, events_file, level, granularity):
     """
     Membaca, memvalidasi, dan memproses file.
-    Menyamakan rentang waktu semua time series dengan 'zero padding'.
+    Sekarang menyertakan 'Company' sebagai level agregasi.
     """
     try:
         df_hist = pd.read_csv(history_file) if history_file.name.endswith('.csv') else pd.read_excel(history_file)
@@ -23,16 +23,19 @@ def process_uploaded_files(history_file, events_file, level, granularity):
 
         df_hist['date'] = pd.to_datetime(df_hist['date'])
 
-        # --- Langkah 1 & 2: Agregasi Spasial & Temporal ---
-        if level == 'Kota':
-            grouping_cols = ['date', 'origin', 'destination', 'fleet_type']
-            location_col = 'destination'
-        elif level == 'Provinsi':
-            grouping_cols = ['date', 'origin', 'province', 'fleet_type']
-            location_col = 'province'
-        else: # Region
-            grouping_cols = ['date', 'origin', 'region', 'fleet_type']
+        # --- Logika Agregasi Dinamis (DITAMBAH COMPANY) ---
+        if level == 'Company':
+            grouping_cols = ['date', 'company', 'fleet_type']
+            location_col = 'company' # 'location' sekarang bisa berarti company
+        elif level == 'Region':
+            grouping_cols = ['date', 'company', 'origin', 'region', 'fleet_type']
             location_col = 'region'
+        elif level == 'Provinsi':
+            grouping_cols = ['date', 'company', 'origin', 'province', 'fleet_type']
+            location_col = 'province'
+        else: # Kota
+            grouping_cols = ['date', 'company', 'origin', 'destination', 'fleet_type']
+            location_col = 'destination'
 
         if 'qty' in df_hist.columns:
             df_agg_spatial = df_hist.groupby(grouping_cols)['qty'].sum().reset_index()
@@ -42,9 +45,16 @@ def process_uploaded_files(history_file, events_file, level, granularity):
             df_agg_spatial = df_hist.groupby(grouping_cols)['y'].sum().reset_index()
 
         df_agg_spatial.rename(columns={location_col: 'location'}, inplace=True)
-        df_agg_spatial['unique_id'] = df_agg_spatial['origin'] + '_' + df_agg_spatial['location'] + '_' + df_agg_spatial['fleet_type']
+        
+        # Pembuatan unique_id disesuaikan untuk level Company
+        if level == 'Company':
+            df_agg_spatial['unique_id'] = df_agg_spatial['location'] + '_' + df_agg_spatial['fleet_type']
+        else:
+            df_agg_spatial['unique_id'] = df_agg_spatial['company'] + '_' + df_agg_spatial['origin'] + '_' + df_agg_spatial['location'] + '_' + df_agg_spatial['fleet_type']
+        
         df_agg_spatial.rename(columns={'date': 'ds'}, inplace=True)
         
+        # --- Resampling dan Zero Padding (Tidak Berubah) ---
         resample_freq = 'MS' if granularity == "Bulanan" else 'W-MON'
         df_time_indexed = df_agg_spatial.set_index('ds')
         
@@ -57,7 +67,6 @@ def process_uploaded_files(history_file, events_file, level, granularity):
 
         df_final_resampled = pd.concat(df_resampled_list)
 
-        # --- Langkah 3: Menyamakan Rentang Waktu (Zero Padding) ---
         global_min_date = df_final_resampled['ds'].min()
         global_max_date = df_final_resampled['ds'].max()
         full_date_range = pd.date_range(start=global_min_date, end=global_max_date, freq=resample_freq)
@@ -65,7 +74,14 @@ def process_uploaded_files(history_file, events_file, level, granularity):
         master_grid = pd.MultiIndex.from_product([all_uids, full_date_range], names=['unique_id', 'ds']).to_frame(index=False)
         df_padded = pd.merge(master_grid, df_final_resampled, on=['unique_id', 'ds'], how='left')
         df_padded['y'] = df_padded['y'].fillna(0)
-        dim_cols = df_agg_spatial[['unique_id', 'origin', 'location', 'fleet_type']].drop_duplicates()
+        
+        # Menambahkan kembali kolom dimensi
+        if level == 'Company':
+            dim_cols = df_agg_spatial[['unique_id', 'location', 'fleet_type']].drop_duplicates()
+            dim_cols.rename(columns={'location': 'company'}, inplace=True)
+        else:
+            dim_cols = df_agg_spatial[['unique_id', 'company', 'origin', 'location', 'fleet_type']].drop_duplicates()
+
         df_final = pd.merge(df_padded, dim_cols, on='unique_id')
 
         # --- Simpan Hasil Akhir ---
@@ -81,7 +97,7 @@ def process_uploaded_files(history_file, events_file, level, granularity):
         st.session_state.data_loaded = False
         return
     
-    # --- Proses File Event (Opsional) ---
+    # --- Proses File Event ---
     try:
         if events_file:
             df_events = pd.read_csv(events_file) if events_file.name.endswith('.csv') else pd.read_excel(events_file)
@@ -103,20 +119,12 @@ def display_upload_section():
     with st.expander("Lihat Panduan Format Data"):
         st.markdown("""
         ### **Panduan Format Data Historis**
-        File ini adalah catatan lengkap perjalanan untuk menjawab: **"Kapan, armada apa, dan berapa banyak, yang dibutuhkan untuk perjalanan dari mana ke mana?"**
-        
-        **Kolom Wajib:**
-        - `date`, `origin`, `destination`, `province`, `region`, `fleet_type`
-        
-        **Kolom Opsional:**
-        - `qty` (Jika tidak ada, aplikasi akan menghitung per baris).
-        
+        **Kolom Wajib:** `date`, `company`, `origin`, `destination`, `province`, `region`, `fleet_type`
+        **Kolom Opsional:** `qty`
         ---
         ### **Panduan Format Data Event**
-        **Penting:** File ini harus mencakup event di masa lalu (untuk model belajar) dan event di masa depan (untuk model memprediksi).
-        
-        **Kolom Wajib:**
-        - `date`, `event`, `uplift`
+        **Penting:** Mencakup event masa lalu dan masa depan.
+        **Kolom Wajib:** `date`, `event`, `uplift`
         """)
 
     history_file = st.file_uploader("Unggah file data historis Anda (CSV atau Excel)", type=['csv', 'xlsx'])
@@ -134,9 +142,7 @@ def display_upload_section():
 
 
 def display_cutoff_selector():
-    """
-    Menampilkan date input untuk cutoff dan memfilter DataFrame utama.
-    """
+    """Menampilkan date input untuk cutoff dan memfilter DataFrame utama."""
     if st.session_state.df_history_full is not None:
         df_full = st.session_state.df_history_full
         min_date = df_full['ds'].min().date()
