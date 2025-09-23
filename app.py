@@ -102,7 +102,7 @@ with st.sidebar:
 # --- Header Profesional ---
 col1, col2 = st.columns([1, 4])
 with col1:
-    st.image(r"C:\Users\irsandi.nur\OneDrive - PT. Bina Karya Prima (BKP)\NEW DIRECTORY\10_Logistik\Forecast Armada\App\asset\logistics.png", width=100)
+    st.image("asset/logistics.png", width=100)
 with col2:
     st.title("Fleet Forecasting Engine")
     st.markdown("##### Rencanakan Kebutuhan Armada")
@@ -325,4 +325,5 @@ elif st.session_state.active_tab == tab_names[4]:
         st.rerun()
 
 # --- PANGGIL FUNGSI FOOTER DI BAGIAN PALING AKHIR ---
+
 display_footer()
