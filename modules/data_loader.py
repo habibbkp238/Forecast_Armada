@@ -118,13 +118,15 @@ def display_upload_section():
     """Menampilkan bagian untuk upload file data."""
     with st.expander("Lihat Panduan Format Data"):
         st.markdown("""
-        ### **Panduan Format Data Historis**
-        **Kolom Wajib:** `date`, `company`, `origin`, `destination`, `province`, `region`, `fleet_type`
-        **Kolom Opsional:** `qty`
+        **Panduan Format Data Historis**
+        - **Kolom Wajib**: `date`, `company`, `origin`, `destination`, `province`, `region`, `fleet_type`
+        - **Kolom Opsional**: `qty`
+
         ---
-        ### **Panduan Format Data Event**
-        **Penting:** Mencakup event masa lalu dan masa depan.
-        **Kolom Wajib:** `date`, `event`, `uplift`
+        **Panduan Format Data Event**
+
+        *Penting: File ini harus mencakup event di masa lalu dan masa depan.*
+        - **Kolom Wajib**: `date`, `event`, `uplift`
         """)
 
     history_file = st.file_uploader("Unggah file data historis Anda (CSV atau Excel)", type=['csv', 'xlsx'])
@@ -160,4 +162,5 @@ def display_cutoff_selector():
         if selected_cutoff != st.session_state.cutoff_date:
             st.session_state.cutoff_date = selected_cutoff
             st.session_state.df_history = df_full[df_full['ds'] <= pd.to_datetime(selected_cutoff)].copy()
+
             st.rerun()
