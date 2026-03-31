@@ -133,14 +133,27 @@ class FleetForecaster:
                 
                 # Create future dates
                 last_date = series_data['ds'].max()
-                freq = pd.infer_freq(series_data['ds'])
-                if freq is None:
-                    freq = 'D'
                 
+                # Use current frequency from data if possible, otherwise fallback to daily
+                try:
+                    inferred_freq = pd.infer_freq(series_data['ds'])
+                    if inferred_freq is None:
+                        inferred_freq = freq
+                except:
+                    inferred_freq = freq
+                
+                # Small adjustment for future date start based on freq
+                if 'W' in inferred_freq:
+                    start_date = last_date + pd.Timedelta(weeks=1)
+                elif 'M' in inferred_freq:
+                    start_date = last_date + pd.DateOffset(months=1)
+                else:
+                    start_date = last_date + pd.Timedelta(days=1)
+
                 future_dates = pd.date_range(
-                    start=last_date + pd.Timedelta(days=1 if freq == 'D' else 30),
+                    start=start_date,
                     periods=horizon,
-                    freq=freq
+                    freq=inferred_freq
                 )
                 
                 # Create forecast dataframe
@@ -184,12 +197,25 @@ class FleetForecaster:
                     periods=forecast_horizon,
                     freq='D'
                 )
-            elif freq == 'MS' or freq == 'M':
+            elif 'W' in freq:
+                future_dates = pd.date_range(
+                    start=last_date + pd.Timedelta(weeks=1),
+                    periods=forecast_horizon,
+                    freq=freq
+                )
+            elif 'M' in freq:
                 # For monthly, use month start
                 future_dates = pd.date_range(
                     start=last_date + pd.DateOffset(months=1),
                     periods=forecast_horizon,
                     freq='MS'
+                )
+            else:
+                # Fallback
+                future_dates = pd.date_range(
+                    start=last_date + pd.Timedelta(days=1),
+                    periods=forecast_horizon,
+                    freq=freq
                 )
             
             # Get all historical dates

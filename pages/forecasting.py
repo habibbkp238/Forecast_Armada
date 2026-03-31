@@ -27,18 +27,39 @@ def render():
     processor = DataProcessor()
     df = st.session_state.data.copy()
     
-    # Get frequency from session or detect
-    if 'freq' in st.session_state:
-        freq_code = st.session_state.freq
-    else:
-        freq_code, _ = processor.detect_frequency(df)
-    
-    freq_name = 'Daily' if freq_code == 'D' else 'Monthly'
+    # Detect source frequency
+    source_freq, _ = processor.detect_frequency(df)
     
     st.markdown("---")
     
     # Configuration Section
     st.markdown("### ⚙️ Forecast Configuration")
+    
+    # 0️⃣ Forecasting Timeframe
+    st.markdown("#### 0️⃣ Forecasting Timeframe")
+    st.markdown("Choose the granularity of your forecast")
+    
+    if source_freq == 'D':
+        timeframe_options = {'Daily': 'D', 'Weekly': 'W-MON', 'Monthly': 'MS'}
+        default_idx = 0
+    else:
+        timeframe_options = {'Monthly': 'MS'}
+        default_idx = 0
+        
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        selected_timeframe = st.selectbox(
+            "Select Forecasting Timeframe",
+            options=list(timeframe_options.keys()),
+            index=default_idx,
+            help="Daily data can be aggregated to weekly or monthly. Monthly data can only be forecasted monthly."
+        )
+        freq_code = timeframe_options[selected_timeframe]
+        freq_name = selected_timeframe
+    
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.info(f"Source data: **{'Daily' if source_freq == 'D' else 'Monthly'}**")
     
     # Aggregation Level
     st.markdown("#### 1️⃣ Aggregation Level")
@@ -96,12 +117,21 @@ def render():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        max_horizon = 365 if freq_code == 'D' else 36
+        if freq_code == 'D':
+            max_horizon = 365
+            default_horizon = 30
+        elif freq_code == 'W-MON':
+            max_horizon = 52
+            default_horizon = 12
+        else: # MS
+            max_horizon = 24
+            default_horizon = 6
+            
         horizon = st.number_input(
             f"Number of {freq_name.lower()} periods",
             min_value=1,
             max_value=max_horizon,
-            value=30 if freq_code == 'D' else 3,
+            value=default_horizon,
             help=f"Forecast horizon: 1 to {max_horizon} periods"
         )
     
@@ -263,28 +293,38 @@ def render():
             st.error("❌ No data available for selected aggregation level")
             return
         
+        # Run forecast progress indicators
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
         # Prepare data
         with st.spinner("Preparing data..."):
-            # Aggregate data
-            agg_df, agg_cols = processor.aggregate_data(df, aggregation_level)
+            # Resample data if target freq != source freq
+            if freq_code != source_freq:
+                status_text.text(f"Resampling data to {freq_name}...")
+                data_to_agg = processor.resample_data(
+                    df,
+                    target_freq=freq_code,
+                    aggregation_cols=['company', 'origin', 'destination', 'province', 'region', 'fleet_type']
+                )
+            else:
+                data_to_agg = df.copy()
+                
+            # Aggregate data based on selected level
+            status_text.text("Aggregating data...")
+            agg_df, agg_cols = processor.aggregate_data(data_to_agg, aggregation_level)
             
             # Fill missing dates
+            status_text.text("Filling missing dates...")
             filled_df = processor.fill_missing_dates(agg_df, freq=freq_code, aggregation_cols=agg_cols)
             
             # Add holiday features if enabled
             if include_holidays:
+                status_text.text("Adding holiday features...")
                 filled_df = processor.add_holiday_features(filled_df, freq=freq_code)
             
             # Prepare for TimeGPT format
             timegpt_df = processor.prepare_for_timegpt(filled_df, agg_cols)
-            print("Columns after prepare_for_timegpt:", timegpt_df.columns.tolist())
-            print("Sample data:")
-            print(timegpt_df.head())
-            print("Unique IDs:", timegpt_df.index.nunique())
-        
-        # Run forecast
-        progress_bar = st.progress(0)
-        status_text = st.empty()
         
         def update_progress(progress, message):
             progress_bar.progress(progress)
@@ -320,6 +360,7 @@ def render():
                 'aggregation_cols': agg_cols,
                 'horizon': horizon,
                 'freq': freq_name,
+                'freq_code': freq_code,
                 'include_holidays': include_holidays,
                 'n_series': series_summary['total_series']
             }

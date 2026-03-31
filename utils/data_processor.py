@@ -121,6 +121,7 @@ class DataProcessor:
         df['unique_id'] = df[aggregation_cols].astype(str).agg('_'.join, axis=1)
         
         # Get full date range
+        # Use freq for date range generation
         date_range = pd.date_range(start=df['date'].min(), end=df['date'].max(), freq=freq)
         
         # Fill missing dates for each series
@@ -138,12 +139,15 @@ class DataProcessor:
             series_df['unique_id'] = unique_id
             
             # Fill other columns with forward fill, then backward fill, then 0
+            # Use fillna instead of method='ffill' which is deprecated in newer pandas
             for col in aggregation_cols:
-                series_df[col] = series_df[col].fillna(method='ffill').fillna(method='bfill')
+                series_df[col] = series_df[col].ffill().bfill()
             
             # Fill province and region
-            series_df['province'] = series_df['province'].fillna(method='ffill').fillna(method='bfill')
-            series_df['region'] = series_df['region'].fillna(method='ffill').fillna(method='bfill')
+            if 'province' in series_df.columns:
+                series_df['province'] = series_df['province'].ffill().bfill()
+            if 'region' in series_df.columns:
+                series_df['region'] = series_df['region'].ffill().bfill()
             
             # Fill qty with 0 for missing dates
             series_df['qty'] = series_df['qty'].fillna(0)
@@ -152,6 +156,38 @@ class DataProcessor:
         
         result_df = pd.concat(filled_dfs, ignore_index=True)
         return result_df.sort_values(['unique_id', 'date']).reset_index(drop=True)
+
+    def resample_data(self, df, target_freq, aggregation_cols):
+        """Resample daily data to weekly or monthly"""
+        if target_freq == 'D' or target_freq is None:
+            return df
+            
+        # Ensure date is datetime
+        df = df.copy()
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Include all available metadata columns in grouping to preserve them
+        metadata_cols = ['company', 'origin', 'destination', 'province', 'region', 'fleet_type']
+        group_cols = [col for col in metadata_cols if col in df.columns]
+        
+        # Pivot: group by metadata + resampled date, sum qty
+        # Set date as index for resampling, then group
+        results = []
+        for keys, grp in df.groupby(group_cols):
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            resampled = grp.set_index('date').resample(target_freq)['qty'].sum().reset_index()
+            # Attach metadata columns back
+            for k, col in zip(keys, group_cols):
+                resampled[col] = k
+            results.append(resampled)
+        
+        if results:
+            resampled_df = pd.concat(results, ignore_index=True)
+        else:
+            resampled_df = df.copy()
+        
+        return resampled_df
     
     def aggregate_data(self, df, aggregation_level):
         """Aggregate data based on selected level"""
@@ -207,18 +243,36 @@ class DataProcessor:
         # Create holiday calendar
         id_holidays = holidays.Indonesia(years=years.tolist())
         
-        # Add is_holiday column
-        df['is_holiday'] = df['date'].apply(lambda x: 1 if x in id_holidays else 0)
+        if freq == 'D':
+            # Add is_holiday column
+            df['is_holiday'] = df['date'].apply(lambda x: 1 if x in id_holidays else 0)
+            
+            # Add day of week (0=Monday, 6=Sunday)
+            df['day_of_week'] = df['date'].dt.dayofweek
+            
+            # Add is_weekend
+            df['is_weekend'] = df['day_of_week'].apply(lambda x: 1 if x >= 5 else 0)
         
-        # Add day of week (0=Monday, 6=Sunday)
-        df['day_of_week'] = df['date'].dt.dayofweek
-        
-        # Add is_weekend
-        df['is_weekend'] = df['day_of_week'].apply(lambda x: 1 if x >= 5 else 0)
-        
-        # For monthly data, add month number
-        if freq == 'MS':
+        elif 'W' in freq:
+            # Weekly: count holidays in that week or just binary?
+            # Binary: if any day in the week is a holiday
+            def check_week_holidays(date):
+                week_dates = pd.date_range(start=date, periods=7, freq='D')
+                return 1 if any(d in id_holidays for d in week_dates) else 0
+            
+            df['is_holiday'] = df['date'].apply(check_week_holidays)
+            df['is_weekend'] = 1 # Weekly data always includes weekends
+            
+        elif 'M' in freq:
+            # Monthly: count holidays in month
+            def count_month_holidays(date):
+                month_dates = pd.date_range(start=date, periods=date.days_in_month, freq='D')
+                return sum(1 for d in month_dates if d in id_holidays)
+            
+            df['holiday_count'] = df['date'].apply(count_month_holidays)
             df['month'] = df['date'].dt.month
+            # Also add binary if any holiday
+            df['is_holiday'] = df['holiday_count'].apply(lambda x: 1 if x > 0 else 0)
         
         return df
     
